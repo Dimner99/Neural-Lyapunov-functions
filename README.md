@@ -15,7 +15,7 @@ The method solves the partial differential equation:
 Where:
 - $W(\mathbf{x})$: Zubov function (approximated by neural network)
 - $\mathbf{f}(\mathbf{x})$: Dynamical system vector field
-- $\omega(\mathbf{x}) = \|\mathbf{x}\|^2$: Positive definite function
+- $\omega(\mathbf{x}) = |\mathbf{x}|^2$: Positive definite function (This uses single bars like your image)
 - $\psi(W) = 0.1(1 + W)$: Scaling function
 
 ### Boundary Conditions
