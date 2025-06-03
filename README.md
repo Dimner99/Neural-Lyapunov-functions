@@ -66,15 +66,15 @@ $$\begin{align}
 
 The neural network is trained using a composite loss function:
 
-$$\mathcal{L} = \mathcal{L}_{PDE} + \mathcal{L}_{BC} + \mathcal{L}_{data}$$
+$$\mathcal{L} = \mathcal{L}\_{PDE} + \mathcal{L}\_{BC} + \mathcal{L}\_{data}$$
 
 Where:
 
-$$\mathcal{L}_{PDE} = \mathbb{E}\left[(\nabla W \cdot \mathbf{f} + \psi(W)\omega(\mathbf{x})(1-W))^2\right]$$
+$$\mathcal{L}\_{PDE} = \mathbb{E}\left[(\nabla W \cdot \mathbf{f} + \psi(W)\omega(\mathbf{x})(1-W))^2\right]$$
 
-$$\mathcal{L}_{BC} = W(\mathbf{0})^2$$
+$$\mathcal{L}\_{BC} = W(\mathbf{0})^2$$
 
-$$\mathcal{L}_{data} = \mathbb{E}\left[(W(\mathbf{x}_{data}) - y_{data})^2\right]$$
+$$\mathcal{L}\_{data} = \mathbb{E}\left[(W(\mathbf{x}\_{data}) - y\_{data})^2\right]$$
 
 ## Implementation
 
