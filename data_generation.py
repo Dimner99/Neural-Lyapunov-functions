@@ -9,13 +9,13 @@ import numpy as np
 from jax.numpy import trapezoid
 from functools import partial
 import time
-import torch
+# import torch
 # %%
 
 backend = jax.devices()[0].platform
 device_jax = jax.devices()[0]
 jax.config.update("jax_platform_name", backend)
-device_torch = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# device_torch = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 ##########################################
@@ -119,6 +119,7 @@ def batched_solve(num_points:int, batch_size:int, t0:jax.Array, t1:jax.Array,
                   omega:callable,
                   beta:callable,
                   key:jax.random.key) -> tuple[jax.Array,jax.Array]:
+
     """
     The event condition must have the following format:
     diffrax.Event(cond_fn={0: Valid_fn,1: Invalid_fn1,2: Invalid_fn2,...})
@@ -141,96 +142,85 @@ def batched_solve(num_points:int, batch_size:int, t0:jax.Array, t1:jax.Array,
     Note2: The beta function is used inside the integration function to transform the results.
     Good options tanh(0.1*x) or 1-jnp.exp(-0.1*x)
     """
-    
+    step = num_points // batch_size
+
     @partial(jax.jit, backend=backend)
     @partial(jax.vmap, in_axes=(0,0))
     def integration(ys:jax.Array, ts:jax.Array) -> tuple[jax.Array,jax.Array,jax.Array]:
         yssq = omega(ys)
-        
         is_valid = ~jnp.isinf(ts)
         integral = trapezoid(
             jnp.where(is_valid, yssq, 0.0),
             jnp.where(is_valid, ts, 0.0)
         )
-        
         result = beta(integral)
         return result, ys[0,0], ys[0,1]
 
-    
     @partial(jax.jit, backend=backend)
-    @partial(jax.vmap, in_axes=(0))
+    @partial(jax.vmap, in_axes=(0,))
     def solver_(y0:jax.Array) -> tuple[jax.Array,jax.Array,jax.Array]:
         sol = diffrax.diffeqsolve(
-            terms=system,              # use "terms" per the current API
-            solver=solver,             # solver (Dopri8, Tsit5, etc.)
-            t0=t0,                     # initial time
-            t1=t1,                     # maximum integration time
-            dt0=dti,                   # initial step size
-            y0=y0,                     # initial state
-            args=args,                 # e.g. mu = 3.0
-            event=term_cond,           # attach the steady-state event
-            max_steps=max_steps,       # use max_steps parameter
-            saveat=diffrax.SaveAt(t0=True,steps=True),  # save at actual steps including initial points
-            stepsize_controller=controller,     # use the PID controller
+            terms=system,
+            solver=solver,
+            t0=t0,
+            t1=t1,
+            dt0=dti,
+            y0=y0,
+            args=args,
+            event=term_cond,
+            max_steps=max_steps,
+            saveat=diffrax.SaveAt(t0=True, steps=True),
+            stepsize_controller=controller,
             throw=False)
-        
-        return sol.ys, sol.ts,sol.event_mask[0] #find which points are valid with event_mask[0] see above for format
-        
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    results = torch.empty(num_points,device=device)
-    x_results = torch.empty(num_points,device=device)
-    y_results = torch.empty(num_points,device=device)
-    step = int(num_points // batch_size)
+        return sol.ys, sol.ts, sol.event_mask[0]
+
+    def scan_fn(carry, _):
+        key = carry
+        key, key1, key2 = jax.random.split(key, 3)
     
-    for i in range(step):
-        #new keys for each batch
-        key,key1,key2=jax.random.split(key,3)
-        x=jax.random.uniform(key1, (batch_size, 1), minval=domain[0][0], maxval=domain[0][1])
-        y=jax.random.uniform(key2, (batch_size, 1), minval=domain[1][0], maxval=domain[1][1])
-        init=jnp.concatenate((x,y),axis=1)
-        ys,ts,mask = solver_(init)
-
-        # Process non - valid trajectories (no integration)
-        p_ = ys[~mask][:,0]
-        x_ = p_[:,0]
-        y_ = p_[:,1]
-        ones_column = jnp.ones(x_.shape[0])
-        
-        # Process equilibrium trajectories (mask entries)
-        p_valid =ys[mask]
-        t_valid=ts[mask]
-        int_results, y0_x1, y0_x2 = integration(p_valid, t_valid)
-        
-        
-        # Update results arrays with appropriate sizes
-        start_idx = i * batch_size
-        end_idx = start_idx + batch_size
-        
-
-        x_batch = jnp.concatenate([x_, y0_x1])
-        y_batch = jnp.concatenate([y_, y0_x2])
-        r_batch = jnp.concatenate([ones_column, int_results])
-        # Fill the results arrays using dlpack machinery
-        x_results[start_idx:end_idx] = torch.utils.dlpack.from_dlpack(
-            jax.dlpack.to_dlpack(x_batch, copy=False, src_device=device_jax)
-        )
-        y_results[start_idx:end_idx] = torch.utils.dlpack.from_dlpack(
-            jax.dlpack.to_dlpack(y_batch, copy=False, src_device=device_jax)
-        )
-        results[start_idx:end_idx]   = torch.utils.dlpack.from_dlpack(
-            jax.dlpack.to_dlpack(r_batch, copy=False, src_device=device_jax)
-        )
-
-            
-    x_results=x_results.numpy()
-    y_results=y_results.numpy()
-    results=results.numpy()
+        # sample init conditions
+        x = jax.random.uniform(key1, (batch_size, 1), minval=domain[0][0], maxval=domain[0][1])
+        y = jax.random.uniform(key2, (batch_size, 1), minval=domain[1][0], maxval=domain[1][1])
+        init = jnp.concatenate((x, y), axis=1)
     
-    return (jnp.concatenate((x_results.reshape(-1,1),y_results.reshape(-1,1)),axis=1),results) 
+        # solve ODE
+        ys, ts, mask = solver_(init)   # shapes: (batch_size, steps, dim), (batch_size, steps), (batch_size,)
+    
+        # --- Instead of slicing with mask ---
+        # pick first step always (for consistency)
+        y0_x1 = ys[:, 0, 0]
+        y0_x2 = ys[:, 0, 1]
+    
+        # do integration for every trajectory
+        int_results, _, _ = integration(ys, ts)
+    
+        # select either:
+        #   - integrated value (if mask == True)
+        #   - 1.0 as "fallback" (if mask == False)
+        r_batch = jnp.where(mask, int_results, 1.0)
+        x_batch = y0_x1
+        y_batch = y0_x2
+    
+        return key, (x_batch, y_batch, r_batch)
+
+
+    # run scan
+    key, (xs, ys, rs) = jax.lax.scan(scan_fn, key, None, length=step)
+
+    # flatten to (num_points,)
+    xs = xs.reshape(-1, 1)
+    ys = ys.reshape(-1, 1)
+    rs = rs.reshape(-1)
+
+    # match original return format
+    coords = jnp.concatenate((xs, ys), axis=1)
+    return coords.block_until_ready(), rs.block_until_ready()
+
+    
 #%%
 
-NUM_POINTS=300
-Batch_size=300
+NUM_POINTS=300000
+Batch_size=30000
 time1=time.time()
 f1=lambda x: 1-jnp.exp(-0.1*x)
 f2=lambda x: jnp.tanh(0.1*x)

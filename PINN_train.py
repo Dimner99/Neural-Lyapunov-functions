@@ -15,7 +15,7 @@ backend = jax.devices()[0].platform
 device_jax = jax.devices()[0]
 jax.config.update("jax_platform_name", backend)
 
-@partial(jax.jit, static_argnames=("args"),backend=backend)
+# @partial(jax.jit, static_argnames=("args"),backend=backend)
 @partial(jax.vmap,in_axes=(0,None))
 def system(x, args):
     # (mu,) = args
@@ -31,12 +31,12 @@ def system(x, args):
 
 
 
-@partial(jax.jit, backend=backend)
+# @partial(jax.jit, backend=backend)
 @jax.vmap
 def omega(x: jax.Array):
     return jnp.sum(x**2)
 
-@partial(jax.jit, backend=backend)
+# @partial(jax.jit, backend=backend)
 def psi(x: jax.Array):
     return 0.1*(1+x)
 
@@ -52,25 +52,25 @@ class Net(nnx.Module):
             self.layers.append(nnx.Linear(in_features=layers_width[i-1], out_features=layers_width[i], rngs=self.rngs))
         self.out = nnx.Linear(in_features=layers_width[-1], out_features=dout, rngs=self.rngs)        
 
-    @nnx.jit
+    # @nnx.jit
     def __call__(self,x: jax.Array):  #&# This will be jitted once during training because we use it 
         for layer in self.layers:     #&# for the data points only 
             x = layer(x)
             x = nnx.tanh(x)
         return self.out(x).squeeze()  
     
-    @nnx.jit                              #&# This will be jitted once during training because we use it
+    # @nnx.jit                              #&# This will be jitted once during training because we use it
     @partial(nnx.vmap,in_axes=(None,0))   #&# for the collocations points only
     def value_and_gradient(self, x):      
         val_,grad_ = nnx.value_and_grad(self.__call__)(x)
         return val_,grad_
     
-@jax.jit
+# @jax.jit
 def jacobian_fn(model):
     return nnx.vmap(nnx.grad(model))
 
 
-@jax.jit
+# @jax.jit
 def dot_vector(x, y):
     return jnp.sum(x * y, axis=1)
 
@@ -120,7 +120,7 @@ def Zubov_training(col_points:jax.Array,
         return loss_batch
     
     loss, grads = nnx.value_and_grad(Zubov_data_loss)(model)
-    optimizer.update(grads) # type: ignore
+    optimizer.update(model=model, grads=grads) # type: ignore
     return loss
 
 
@@ -135,15 +135,15 @@ maxy=10
 domain=((minx,maxx),(miny,maxy))
 
 model1=Net(2,[10,10,10],dout=1,rngs=nnx.Rngs(1100))
-optimizer1=nnx.Optimizer(model1, optax.adam(learning_rate=1e-3))
-args=(1.0,)
+optimizer1=nnx.Optimizer(model1, optax.adam(learning_rate=1e-3),wrt=nnx.Param)
+args=(5.0,)
 # args=(0.125,)
 #%%
 ########### FURTHER OPTIMIZATION THROUGH jax.fori_loop FOR THE TRAINING LOOP ############
 #^############# SPEEDUP 2X for CPU and 10X for GPU compared to the for loop  #^#############
 
-model3=Net(2,[10,10,10],dout=1,rngs=nnx.Rngs(1020))
-optimizer3=nnx.Optimizer(model3, optax.adam(learning_rate=1e-3))
+model3=Net(2,[30,30,30],dout=1,rngs=nnx.Rngs(1020))
+optimizer3=nnx.Optimizer(model3, optax.adam(learning_rate=1e-3),wrt=nnx.Param)
 data_points=RESULTS
 
 #%%
